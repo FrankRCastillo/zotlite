@@ -65,10 +65,8 @@ def main():
         print("Error: Missing library_path in settings.")
         sys.exit(1)
 
-    # Safely strip any SCP-style colons before parsing
-    clean_path = raw_path.replace(":/", "/").replace(":", "/") if "://" in raw_path else raw_path
-        
-    parsed_uri = urlparse(clean_path)
+    # Clean parsing - absolutely no string replacements this time
+    parsed_uri = urlparse(raw_path)
     conn_type = 'ssh' if parsed_uri.scheme == 'ssh' else 'local'
     
     print(f"[DEBUG] Raw Config Path: {raw_path}")
@@ -76,14 +74,9 @@ def main():
     
     sftp = None
     if conn_type == 'ssh':
-        # Fallback parsing in case urlparse completely fails on the string
-        hostname = parsed_uri.hostname or clean_path.split('@')[-1].split('/')[0]
-        username = parsed_uri.username or (clean_path.split('//')[-1].split('@')[0] if '@' in clean_path else None)
-        
-        # Extract the true path
+        hostname = parsed_uri.hostname
+        username = parsed_uri.username
         remote_zotero_path = parsed_uri.path
-        if not remote_zotero_path.startswith('/'):
-            remote_zotero_path = '/' + remote_zotero_path.split('/', 1)[-1]
             
         print(f"[DEBUG] Parsed Host: {hostname} | User: {username} | Path: {remote_zotero_path}")
 
