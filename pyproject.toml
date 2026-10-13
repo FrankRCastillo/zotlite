@@ -12,4 +12,4 @@ dependencies = []
 
 [project.scripts]
 # This creates the terminal command 'zotlite' when installed
-zotlite = "zotlite.cli:mainggVGd"
+zotlite = "zotlite.cli:main"
