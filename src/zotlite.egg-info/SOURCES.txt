@@ -1,0 +1,8 @@
+README.md
+pyproject.toml
+src/zotlite/cli.py
+src/zotlite.egg-info/PKG-INFO
+src/zotlite.egg-info/SOURCES.txt
+src/zotlite.egg-info/dependency_links.txt
+src/zotlite.egg-info/entry_points.txt
+src/zotlite.egg-info/top_level.txt
