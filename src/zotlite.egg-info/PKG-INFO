@@ -1,9 +1,10 @@
 Metadata-Version: 2.4
 Name: zotlite
-Version: 0.1.0
+Version: 0.2.0
 Summary: A lightweight terminal UI for browsing and opening Zotero PDFs.
-Requires-Python: >=3.7
+Requires-Python: >=3.11
 Description-Content-Type: text/markdown
+Requires-Dist: paramiko>=3.0.0
 
 # ZotLite
 
