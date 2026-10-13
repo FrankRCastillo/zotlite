@@ -56,14 +56,20 @@ def setup_ssh_client(hostname, username=None):
 def load_all_items(db_conn):
     cursor = db_conn.cursor()
     
+    # 1. Get base items (Filters out TRASH and GROUP LIBRARIES)
     cursor.execute("""
         SELECT i.itemID, i.key, t.typeName
         FROM items i
         JOIN itemTypes t ON i.itemTypeID = t.itemTypeID
+        JOIN libraries l ON i.libraryID = l.libraryID
+        LEFT JOIN deletedItems d ON i.itemID = d.itemID
         WHERE t.typeName NOT IN ('attachment', 'note', 'annotation')
+          AND d.itemID IS NULL
+          AND l.type = 'user'
     """)
     items_dict = {row[0]: {'id': row[0], 'key': row[1], 'type': row[2], 'fields': {}, 'creators': []} for row in cursor.fetchall()}
     
+    # 2. Get metadata fields
     cursor.execute("""
         SELECT id.itemID, f.fieldName, v.value
         FROM itemData id
@@ -74,6 +80,7 @@ def load_all_items(db_conn):
         if row[0] in items_dict:
             items_dict[row[0]]['fields'][row[1]] = str(row[2])
             
+    # 3. Get authors
     cursor.execute("""
         SELECT ic.itemID, c.lastName
         FROM itemCreators ic
@@ -84,6 +91,7 @@ def load_all_items(db_conn):
         if row[0] in items_dict:
             items_dict[row[0]]['creators'].append(row[1])
 
+    # 4. Format data for the UI Table
     display_list = []
     for i_id, data in items_dict.items():
         fields = data['fields']
