@@ -56,7 +56,6 @@ def setup_ssh_client(hostname, username=None):
 def load_all_items(db_conn):
     cursor = db_conn.cursor()
     
-    # 1. Get base items (Filters out TRASH and GROUP LIBRARIES)
     cursor.execute("""
         SELECT i.itemID, i.key, t.typeName
         FROM items i
@@ -69,7 +68,6 @@ def load_all_items(db_conn):
     """)
     items_dict = {row[0]: {'id': row[0], 'key': row[1], 'type': row[2], 'fields': {}, 'creators': []} for row in cursor.fetchall()}
     
-    # 2. Get metadata fields
     cursor.execute("""
         SELECT id.itemID, f.fieldName, v.value
         FROM itemData id
@@ -80,7 +78,6 @@ def load_all_items(db_conn):
         if row[0] in items_dict:
             items_dict[row[0]]['fields'][row[1]] = str(row[2])
             
-    # 3. Get authors
     cursor.execute("""
         SELECT ic.itemID, c.lastName
         FROM itemCreators ic
@@ -91,15 +88,15 @@ def load_all_items(db_conn):
         if row[0] in items_dict:
             items_dict[row[0]]['creators'].append(row[1])
 
-    # 4. Format data for the UI Table
     display_list = []
     for i_id, data in items_dict.items():
         fields = data['fields']
         title = fields.get('title', '[No Title]')
-        raw_date = fields.get('date', '')
-        date_str = raw_date[:10] if raw_date else ""
+        
+        # Keep the full raw date for display, but ensure it's a string
+        date_str = fields.get('date', '')
+        
         creators = data['creators']
-
         if len(creators) > 2: author_str = f"{creators[0]} et al."
         elif len(creators) == 2: author_str = f"{creators[0]} & {creators[1]}"
         elif len(creators) == 1: author_str = creators[0]
@@ -119,14 +116,11 @@ def load_all_items(db_conn):
             'fields': fields
         })
         
-    display_list.sort(key=lambda x: (x['date'], x['title']), reverse=True)
     return display_list
 
 def trunc(text, width):
-    """Truncate text with ellipsis if it exceeds the column width."""
     text = str(text)
-    if width <= 3:
-        return "." * width
+    if width <= 3: return "." * width
     return (text[:width-3] + "...") if len(text) > width else text.ljust(width)
 
 def tui_loop(stdscr, db_conn, raw_path, zotero_path, remote_zotero_path, sftp, cache_dir):
@@ -135,27 +129,38 @@ def tui_loop(stdscr, db_conn, raw_path, zotero_path, remote_zotero_path, sftp, c
     curses.start_color()
     curses.use_default_colors()
     
-    # Mouse events (including common scroll wheel constants)
     curses.mousemask(curses.ALL_MOUSE_EVENTS | curses.REPORT_MOUSE_POSITION)
     SCROLL_UP = getattr(curses, 'BUTTON4_PRESSED', 524288)
     SCROLL_DOWN = getattr(curses, 'BUTTON5_PRESSED', 2097152)
     
-    curses.init_pair(1, curses.COLOR_BLACK, curses.COLOR_CYAN)  # Highlight
-    curses.init_pair(2, curses.COLOR_BLACK, curses.COLOR_WHITE) # Status Bar
-    curses.init_pair(3, curses.COLOR_WHITE, curses.COLOR_BLUE)  # Headers
+    curses.init_pair(1, curses.COLOR_BLACK, curses.COLOR_CYAN) 
+    curses.init_pair(2, curses.COLOR_BLACK, curses.COLOR_WHITE)
+    curses.init_pair(3, curses.COLOR_WHITE, curses.COLOR_BLUE)
 
     items = load_all_items(db_conn)
     
     # Navigation States
-    active_pane = 0 # 0 = Table, 1 = Attributes
+    active_pane = 0 
     item_idx = 0
     item_scroll = 0
     detail_scroll = 0
     last_click_time = 0
     
+    # Sorting States
+    sort_col = 'date'
+    sort_rev = True
+    
+    def apply_sort():
+        nonlocal item_idx, item_scroll
+        items.sort(key=lambda x: str(x[sort_col]).lower(), reverse=sort_rev)
+        item_idx = 0
+        item_scroll = 0
+
+    apply_sort() # Initial sort
+    
     # Dynamic Width States
     details_w_pct = 0.33
-    w_date = 8
+    w_date = 10
     w_key = 18
     w_auth = 20
 
@@ -168,19 +173,17 @@ def tui_loop(stdscr, db_conn, raw_path, zotero_path, remote_zotero_path, sftp, c
         list_w = max_x - details_w - 1
         list_h = max_y - 3 
         
-        # Prevent columns from exceeding terminal width
         total_fixed = w_date + w_key + w_auth + 13
         if total_fixed > list_w - 5:
             overshoot = total_fixed - (list_w - 5)
             w_auth = max(4, w_auth - overshoot)
         w_title = max(5, list_w - (w_date + w_key + w_auth + 13))
 
-        # Build Details Pane Text so we can calculate max scroll
         detail_lines = []
         if items:
             sel_fields = items[item_idx]['fields']
             for key_name, val in sel_fields.items():
-                detail_lines.append((f"{key_name.capitalize()}:", True)) # True = Bold
+                detail_lines.append((f"{key_name.capitalize()}:", True)) 
                 wrapped = textwrap.wrap(val, width=details_w - 4)
                 for line in wrapped:
                     detail_lines.append((f"  {line}", False))
@@ -189,15 +192,20 @@ def tui_loop(stdscr, db_conn, raw_path, zotero_path, remote_zotero_path, sftp, c
         max_detail_scroll = max(0, len(detail_lines) - list_h)
         detail_scroll = max(0, min(detail_scroll, max_detail_scroll))
 
-        # Draw Headers (Active pane header is bolded)
+        # Dynamic Sorting Arrows
+        arr_d = "▼" if sort_col == 'date' and sort_rev else ("▲" if sort_col == 'date' else "")
+        arr_k = "▼" if sort_col == 'citekey' and sort_rev else ("▲" if sort_col == 'citekey' else "")
+        arr_a = "▼" if sort_col == 'author' and sort_rev else ("▲" if sort_col == 'author' else "")
+        arr_t = "▼" if sort_col == 'title' and sort_rev else ("▲" if sort_col == 'title' else "")
+
+        # Draw Headers 
         hdr_attr_left = curses.color_pair(3) | (curses.A_BOLD if active_pane == 0 else curses.A_NORMAL)
         hdr_attr_right = curses.color_pair(3) | (curses.A_BOLD if active_pane == 1 else curses.A_NORMAL)
         
-        header_str = f" {trunc('Date(1/2)', w_date)} | {trunc('CiteKey(3/4)', w_key)} | {trunc('Author(5/6)', w_auth)} | {trunc('Title', w_title)}"
+        header_str = f" {trunc('Date'+arr_d, w_date)} | {trunc('CiteKey'+arr_k, w_key)} | {trunc('Author'+arr_a, w_auth)} | {trunc('Title'+arr_t, w_title)}"
         stdscr.addstr(0, 0, header_str[:list_w].ljust(list_w), hdr_attr_left)
-        stdscr.addstr(0, list_w + 1, " ATTRIBUTES (7/8) ".center(details_w), hdr_attr_right)
+        stdscr.addstr(0, list_w + 1, " ATTRIBUTES ".center(details_w), hdr_attr_right)
 
-        # Draw Vertical Separator
         for i in range(1, max_y - 1):
             stdscr.addch(i, list_w, curses.ACS_VLINE)
 
@@ -210,24 +218,22 @@ def tui_loop(stdscr, db_conn, raw_path, zotero_path, remote_zotero_path, sftp, c
                 
                 disp_str = row_str[:list_w-1].ljust(list_w)
                 if idx == item_idx:
-                    # Highlight selection if table is active, otherwise just subtle inverse
                     stdscr.addstr(i + 1, 0, disp_str, curses.color_pair(1) if active_pane == 0 else curses.A_REVERSE)
                 else:
                     stdscr.addstr(i + 1, 0, disp_str)
 
-        # Draw Details Pane (Right Side)
+        # Draw Details Pane
         for i in range(list_h):
             idx = detail_scroll + i
             if idx < len(detail_lines):
                 text, is_bold = detail_lines[idx]
                 attr = curses.A_BOLD if is_bold else curses.A_NORMAL
-                # If Details pane is active, give it a subtle highlight on the text block
                 if active_pane == 1 and text.strip(): attr |= curses.color_pair(1)
                 
                 stdscr.addstr(i + 1, list_w + 2, text[:details_w-2].ljust(details_w-2), attr)
 
         # Draw Status Bar
-        status = " [TAB] Switch Pane | [1-8] Resize | [PgUp/PgDn] Scroll | [ENTER/DBL-CLK] Open PDF "
+        status = " [TAB] Switch | [S]ort / [R]everse | [1-8] Resize | [ENTER/DBL-CLK] Open PDF "
         stdscr.addstr(max_y - 1, 0, status[:max_x-1].ljust(max_x - 1), curses.color_pair(2))
         stdscr.refresh()
 
@@ -242,6 +248,15 @@ def tui_loop(stdscr, db_conn, raw_path, zotero_path, remote_zotero_path, sftp, c
         elif key == 9: # TAB
             active_pane = 1 - active_pane
             
+        # Sorting Hotkeys
+        elif key in [ord('s'), ord('S')]:
+            cols = ['date', 'citekey', 'author', 'title']
+            sort_col = cols[(cols.index(sort_col) + 1) % 4]
+            apply_sort()
+        elif key in [ord('r'), ord('R')]:
+            sort_rev = not sort_rev
+            apply_sort()
+
         # Resizing Shortcuts
         elif key == ord('1'): w_date = max(4, w_date - 1)
         elif key == ord('2'): w_date += 1
@@ -269,7 +284,7 @@ def tui_loop(stdscr, db_conn, raw_path, zotero_path, remote_zotero_path, sftp, c
             elif active_pane == 1:
                 detail_scroll = min(max_detail_scroll, detail_scroll + 1)
                 
-        elif key == curses.KEY_PPAGE: # Page Up
+        elif key == curses.KEY_PPAGE:
             if active_pane == 0:
                 item_idx = max(0, item_idx - list_h)
                 item_scroll = max(0, item_scroll - list_h)
@@ -277,7 +292,7 @@ def tui_loop(stdscr, db_conn, raw_path, zotero_path, remote_zotero_path, sftp, c
             elif active_pane == 1:
                 detail_scroll = max(0, detail_scroll - list_h)
                 
-        elif key == curses.KEY_NPAGE: # Page Down
+        elif key == curses.KEY_NPAGE:
             if active_pane == 0:
                 item_idx = min(len(items) - 1, item_idx + list_h)
                 item_scroll = min(max(0, len(items) - list_h), item_scroll + list_h)
@@ -294,7 +309,6 @@ def tui_loop(stdscr, db_conn, raw_path, zotero_path, remote_zotero_path, sftp, c
             except curses.error:
                 continue
                 
-            # Scroll Wheel Up
             if bstate & SCROLL_UP or bstate == 65536:
                 if mouse_x < list_w:
                     item_idx = max(0, item_idx - 1)
@@ -303,7 +317,6 @@ def tui_loop(stdscr, db_conn, raw_path, zotero_path, remote_zotero_path, sftp, c
                 else:
                     detail_scroll = max(0, detail_scroll - 1)
                     
-            # Scroll Wheel Down
             elif bstate & SCROLL_DOWN or bstate == 2097152:
                 if mouse_x < list_w:
                     item_idx = min(len(items)-1, item_idx + 1)
@@ -312,9 +325,23 @@ def tui_loop(stdscr, db_conn, raw_path, zotero_path, remote_zotero_path, sftp, c
                 else:
                     detail_scroll = min(max_detail_scroll, detail_scroll + 1)
                     
-            # Left Click
             elif bstate & curses.BUTTON1_PRESSED or bstate & curses.BUTTON1_CLICKED:
-                if 0 < mouse_y <= list_h and mouse_x < list_w:
+                # Mouse Clicked Header to Sort
+                if mouse_y == 0 and mouse_x < list_w:
+                    if mouse_x <= w_date + 2: new_col = 'date'
+                    elif mouse_x <= w_date + w_key + 5: new_col = 'citekey'
+                    elif mouse_x <= w_date + w_key + w_auth + 8: new_col = 'author'
+                    else: new_col = 'title'
+                    
+                    if sort_col == new_col:
+                        sort_rev = not sort_rev
+                    else:
+                        sort_col = new_col
+                        sort_rev = False
+                    apply_sort()
+                    
+                # Mouse Clicked Table Row
+                elif 0 < mouse_y <= list_h and mouse_x < list_w:
                     active_pane = 0
                     clicked_idx = item_scroll + (mouse_y - 1)
                     if 0 <= clicked_idx < len(items):
@@ -327,7 +354,6 @@ def tui_loop(stdscr, db_conn, raw_path, zotero_path, remote_zotero_path, sftp, c
                 elif mouse_x > list_w:
                     active_pane = 1
         
-        # Handle Opening PDF
         if trigger_open and items:
             selected_item_id = items[item_idx]['id']
             cursor = db_conn.cursor()
