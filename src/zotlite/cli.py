@@ -5,7 +5,6 @@ import sys
 import tomllib
 import getpass
 from pathlib import Path
-from urllib.parse import urlparse
 
 try:
     import paramiko
@@ -40,7 +39,7 @@ def setup_ssh_client(hostname, username=None):
     client = paramiko.SSHClient()
     client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
     
-    print(f"[DEBUG] Connecting to SSH -> {connect_kwargs['username']}@{connect_kwargs['hostname']}:{connect_kwargs['port']}")
+    print(f"Connecting to SSH -> {connect_kwargs['username']}@{connect_kwargs['hostname']}...")
     try:
         client.connect(**connect_kwargs)
     except paramiko.ssh_exception.AuthenticationException:
@@ -60,25 +59,28 @@ def main():
     with open(config_path, "rb") as f:
         config = tomllib.load(f)
 
-    raw_path = config.get('zotero', {}).get('library_path', '')
+    raw_path = config.get('zotero', {}).get('library_path', '').strip()
     if not raw_path:
         print("Error: Missing library_path in settings.")
         sys.exit(1)
-
-    # Clean parsing - absolutely no string replacements this time
-    parsed_uri = urlparse(raw_path)
-    conn_type = 'ssh' if parsed_uri.scheme == 'ssh' else 'local'
-    
-    print(f"[DEBUG] Raw Config Path: {raw_path}")
-    print(f"[DEBUG] Connection Type: {conn_type}")
     
     sftp = None
-    if conn_type == 'ssh':
-        hostname = parsed_uri.hostname
-        username = parsed_uri.username
-        remote_zotero_path = parsed_uri.path
-            
-        print(f"[DEBUG] Parsed Host: {hostname} | User: {username} | Path: {remote_zotero_path}")
+    if raw_path.startswith("ssh://"):
+        # Format expected: ssh://username@hostname/path/to/Zotero
+        path_without_scheme = raw_path[6:] # Strip ssh://
+        
+        # Split out username, hostname, and path
+        user_host, remote_zotero_path = path_without_scheme.split('/', 1)
+        remote_zotero_path = '/' + remote_zotero_path # add the slash back
+        
+        if '@' in user_host:
+            username, hostname = user_host.split('@', 1)
+        else:
+            username = None
+            hostname = user_host
+
+        # Clean up any accidental SCP colons
+        hostname = hostname.replace(":", "")
 
         client = setup_ssh_client(hostname=hostname, username=username)
         sftp = client.open_sftp()
@@ -89,17 +91,16 @@ def main():
         db_path = cache_dir / "zotero.sqlite"
         remote_db = f"{remote_zotero_path}/zotero.sqlite".replace("//", "/")
         
-        print(f"[DEBUG] Fetching DB from: {remote_db}")
+        print("Syncing database...")
         try:
             sftp.get(remote_db, str(db_path))
         except IOError:
             print(f"\nError: Database not found on remote server at {remote_db}")
             sys.exit(1)
     else:
-        local_target = parsed_uri.path if parsed_uri.scheme else raw_path
-        zotero_path = Path(local_target).expanduser()
+        # Local connection
+        zotero_path = Path(raw_path).expanduser()
         db_path = zotero_path / 'zotero.sqlite'
-        print(f"[DEBUG] Using local DB at: {db_path}")
 
     if not db_path.exists():
         print(f"Error: Database not found at {db_path}")
@@ -179,7 +180,7 @@ def main():
                 key, path = result
                 filename = path.replace('storage:', '')
                 
-                if conn_type == 'ssh':
+                if raw_path.startswith("ssh://"):
                     remote_pdf = f"{remote_zotero_path}/storage/{key}/{filename}".replace("//", "/")
                     local_pdf = cache_dir / filename
                     print(f"\nDownloading {filename}...")
