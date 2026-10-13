@@ -96,12 +96,9 @@ def load_all_items(db_conn):
     for i_id, data in items_dict.items():
         fields = data['fields']
         title = fields.get('title', '[No Title]')
-        
-        raw_date = fields.get('date', '')
-        date_match = re.search(r'\d{4}', raw_date)
-        date_str = date_match.group(0) if date_match else raw_date[:4]
-        
+        date_str = fields.get('date', '') 
         creators = data['creators']
+
         if len(creators) > 2: author_str = f"{creators[0]} et al."
         elif len(creators) == 2: author_str = f"{creators[0]} & {creators[1]}"
         elif len(creators) == 1: author_str = creators[0]
