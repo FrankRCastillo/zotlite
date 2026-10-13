@@ -96,7 +96,8 @@ def load_all_items(db_conn):
     for i_id, data in items_dict.items():
         fields = data['fields']
         title = fields.get('title', '[No Title]')
-        date_str = fields.get('date', '') 
+        raw_date = fields.get('date', '')
+        date_str = raw_date[:10] if raw_date else ""
         creators = data['creators']
 
         if len(creators) > 2: author_str = f"{creators[0]} et al."
@@ -154,7 +155,7 @@ def tui_loop(stdscr, db_conn, raw_path, zotero_path, remote_zotero_path, sftp, c
     
     # Dynamic Width States
     details_w_pct = 0.33
-    w_date = 6
+    w_date = 8
     w_key = 18
     w_auth = 20
 
