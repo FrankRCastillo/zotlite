@@ -93,7 +93,6 @@ def load_all_items(db_conn):
         fields = data['fields']
         title = fields.get('title', '[No Title]')
         
-        # Keep the full raw date for display, but ensure it's a string
         date_str = fields.get('date', '')
         
         creators = data['creators']
@@ -124,7 +123,8 @@ def trunc(text, width):
     return (text[:width-3] + "...") if len(text) > width else text.ljust(width)
 
 def tui_loop(stdscr, db_conn, raw_path, zotero_path, remote_zotero_path, sftp, cache_dir):
-    curses.curs_set(0)
+    try: curses.curs_set(0)
+    except curses.error: pass
     stdscr.nodelay(0)
     curses.start_color()
     curses.use_default_colors()
@@ -156,7 +156,10 @@ def tui_loop(stdscr, db_conn, raw_path, zotero_path, remote_zotero_path, sftp, c
         item_idx = 0
         item_scroll = 0
 
-    apply_sort() # Initial sort
+    apply_sort()
+    
+    # Search States
+    last_search = ""
     
     # Dynamic Width States
     details_w_pct = 0.33
@@ -168,7 +171,6 @@ def tui_loop(stdscr, db_conn, raw_path, zotero_path, remote_zotero_path, sftp, c
         max_y, max_x = stdscr.getmaxyx()
         stdscr.clear()
 
-        # Responsive Layout Math
         details_w = max(15, int(max_x * details_w_pct))
         list_w = max_x - details_w - 1
         list_h = max_y - 3 
@@ -192,13 +194,11 @@ def tui_loop(stdscr, db_conn, raw_path, zotero_path, remote_zotero_path, sftp, c
         max_detail_scroll = max(0, len(detail_lines) - list_h)
         detail_scroll = max(0, min(detail_scroll, max_detail_scroll))
 
-        # Dynamic Sorting Arrows
         arr_d = "▼" if sort_col == 'date' and sort_rev else ("▲" if sort_col == 'date' else "")
         arr_k = "▼" if sort_col == 'citekey' and sort_rev else ("▲" if sort_col == 'citekey' else "")
         arr_a = "▼" if sort_col == 'author' and sort_rev else ("▲" if sort_col == 'author' else "")
         arr_t = "▼" if sort_col == 'title' and sort_rev else ("▲" if sort_col == 'title' else "")
 
-        # Draw Headers 
         hdr_attr_left = curses.color_pair(3) | (curses.A_BOLD if active_pane == 0 else curses.A_NORMAL)
         hdr_attr_right = curses.color_pair(3) | (curses.A_BOLD if active_pane == 1 else curses.A_NORMAL)
         
@@ -209,7 +209,6 @@ def tui_loop(stdscr, db_conn, raw_path, zotero_path, remote_zotero_path, sftp, c
         for i in range(1, max_y - 1):
             stdscr.addch(i, list_w, curses.ACS_VLINE)
 
-        # Draw Library Table
         for i in range(list_h):
             idx = item_scroll + i
             if idx < len(items):
@@ -222,7 +221,6 @@ def tui_loop(stdscr, db_conn, raw_path, zotero_path, remote_zotero_path, sftp, c
                 else:
                     stdscr.addstr(i + 1, 0, disp_str)
 
-        # Draw Details Pane
         for i in range(list_h):
             idx = detail_scroll + i
             if idx < len(detail_lines):
@@ -232,12 +230,10 @@ def tui_loop(stdscr, db_conn, raw_path, zotero_path, remote_zotero_path, sftp, c
                 
                 stdscr.addstr(i + 1, list_w + 2, text[:details_w-2].ljust(details_w-2), attr)
 
-        # Draw Status Bar
-        status = " [TAB] Switch | [S]ort / [R]everse | [1-8] Resize | [ENTER/DBL-CLK] Open PDF "
+        status = " [/] Search | [n/N] Next | [TAB] Switch | [S]ort | [1-8] Resize | [ENTER] Open "
         stdscr.addstr(max_y - 1, 0, status[:max_x-1].ljust(max_x - 1), curses.color_pair(2))
         stdscr.refresh()
 
-        # Handle Inputs
         key = stdscr.getch()
         trigger_open = False
 
@@ -245,10 +241,9 @@ def tui_loop(stdscr, db_conn, raw_path, zotero_path, remote_zotero_path, sftp, c
             break
         elif key == curses.KEY_RESIZE:
             continue
-        elif key == 9: # TAB
+        elif key == 9: 
             active_pane = 1 - active_pane
             
-        # Sorting Hotkeys
         elif key in [ord('s'), ord('S')]:
             cols = ['date', 'citekey', 'author', 'title']
             sort_col = cols[(cols.index(sort_col) + 1) % 4]
@@ -257,7 +252,59 @@ def tui_loop(stdscr, db_conn, raw_path, zotero_path, remote_zotero_path, sftp, c
             sort_rev = not sort_rev
             apply_sort()
 
-        # Resizing Shortcuts
+        # Handle Search Mode
+        elif key == ord('/'):
+            try: curses.curs_set(1)
+            except curses.error: pass
+            
+            search_query = ""
+            while True:
+                prompt = f"/{sort_col.capitalize()}: {search_query}"
+                stdscr.addstr(max_y - 1, 0, prompt[:max_x-1].ljust(max_x - 1), curses.color_pair(2))
+                stdscr.move(max_y - 1, min(len(prompt), max_x - 1))
+                stdscr.refresh()
+                
+                c = stdscr.getch()
+                if c in [10, 13, curses.KEY_ENTER]:
+                    break
+                elif c == 27: # Escape key
+                    search_query = None
+                    break
+                elif c in [8, 127, curses.KEY_BACKSPACE]:
+                    search_query = search_query[:-1]
+                elif 32 <= c <= 126:
+                    search_query += chr(c)
+                    
+            try: curses.curs_set(0)
+            except curses.error: pass
+            
+            if search_query:
+                last_search = search_query.lower()
+                found = False
+                for i in range(len(items)):
+                    idx = (item_idx + 1 + i) % len(items)
+                    if last_search in str(items[idx][sort_col]).lower():
+                        item_idx = idx
+                        if item_idx < item_scroll or item_idx >= item_scroll + list_h:
+                            item_scroll = max(0, item_idx - list_h // 2)
+                        found = True
+                        break
+                if not found:
+                    stdscr.addstr(max_y - 1, 0, " [!] Pattern not found ".ljust(max_x - 1), curses.color_pair(2))
+                    stdscr.refresh()
+                    curses.napms(1000)
+
+        # Handle Search Next/Prev
+        elif key in [ord('n'), ord('N')] and last_search:
+            step = 1 if key == ord('n') else -1
+            for i in range(len(items)):
+                idx = (item_idx + step + (i * step)) % len(items)
+                if last_search in str(items[idx][sort_col]).lower():
+                    item_idx = idx
+                    if item_idx < item_scroll or item_idx >= item_scroll + list_h:
+                        item_scroll = max(0, item_idx - list_h // 2)
+                    break
+
         elif key == ord('1'): w_date = max(4, w_date - 1)
         elif key == ord('2'): w_date += 1
         elif key == ord('3'): w_key = max(5, w_key - 1)
@@ -267,7 +314,6 @@ def tui_loop(stdscr, db_conn, raw_path, zotero_path, remote_zotero_path, sftp, c
         elif key == ord('7'): details_w_pct = max(0.15, details_w_pct - 0.05)
         elif key == ord('8'): details_w_pct = min(0.70, details_w_pct + 0.05)
         
-        # Navigation
         elif key == curses.KEY_UP:
             if active_pane == 0 and item_idx > 0:
                 item_idx -= 1
@@ -326,7 +372,6 @@ def tui_loop(stdscr, db_conn, raw_path, zotero_path, remote_zotero_path, sftp, c
                     detail_scroll = min(max_detail_scroll, detail_scroll + 1)
                     
             elif bstate & curses.BUTTON1_PRESSED or bstate & curses.BUTTON1_CLICKED:
-                # Mouse Clicked Header to Sort
                 if mouse_y == 0 and mouse_x < list_w:
                     if mouse_x <= w_date + 2: new_col = 'date'
                     elif mouse_x <= w_date + w_key + 5: new_col = 'citekey'
@@ -340,7 +385,6 @@ def tui_loop(stdscr, db_conn, raw_path, zotero_path, remote_zotero_path, sftp, c
                         sort_rev = False
                     apply_sort()
                     
-                # Mouse Clicked Table Row
                 elif 0 < mouse_y <= list_h and mouse_x < list_w:
                     active_pane = 0
                     clicked_idx = item_scroll + (mouse_y - 1)
