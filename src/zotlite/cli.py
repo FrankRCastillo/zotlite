@@ -25,10 +25,12 @@ def setup_ssh_client(hostname, username=None):
             ssh_config.parse(f)
             
     host_conf = ssh_config.lookup(hostname)
-    connect_kwargs = {
-        'hostname': host_conf.get('hostname', hostname),
-        'port': int(host_conf.get('port', 22))
-    }
+    host_name = host_conf.get('hostname', hostname)
+    host_port = int(host_conf.get('port', 22)) 
+
+    connect_kwargs = { 'hostname' : host_name
+                     , 'port'     : host_port
+                     }
     
     if username:
         connect_kwargs['username'] = username
@@ -44,8 +46,10 @@ def setup_ssh_client(hostname, username=None):
     client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
     
     print(f"Connecting to SSH -> {connect_kwargs['username']}@{connect_kwargs['hostname']}...")
+
     try:
         client.connect(**connect_kwargs)
+
     except paramiko.ssh_exception.AuthenticationException:
         password = getpass.getpass(f"Password for {connect_kwargs['username']}@{connect_kwargs['hostname']}: ")
         connect_kwargs['password'] = password
@@ -66,7 +70,13 @@ def load_all_items(db_conn):
           AND d.itemID IS NULL
           AND l.type = 'user'
     """)
-    items_dict = {row[0]: {'id': row[0], 'key': row[1], 'type': row[2], 'fields': {}, 'creators': []} for row in cursor.fetchall()}
+    items_dict = { row[0]:  { 'id'      : row[0]
+                            , 'key'     : row[1]
+                            , 'type'    : row[2]
+                            , 'fields'  : {}
+                            , 'creators': []
+                            } for row in cursor.fetchall()
+                 }
     
     cursor.execute("""
         SELECT id.itemID, f.fieldName, v.value
@@ -74,6 +84,7 @@ def load_all_items(db_conn):
         JOIN fields f ON id.fieldID = f.fieldID
         JOIN itemDataValues v ON id.valueID = v.valueID
     """)
+
     for row in cursor.fetchall():
         if row[0] in items_dict:
             items_dict[row[0]]['fields'][row[1]] = str(row[2])
@@ -84,11 +95,13 @@ def load_all_items(db_conn):
         JOIN creators c ON ic.creatorID = c.creatorID
         ORDER BY ic.orderIndex
     """)
+
     for row in cursor.fetchall():
         if row[0] in items_dict:
             items_dict[row[0]]['creators'].append(row[1])
 
     display_list = []
+
     for i_id, data in items_dict.items():
         fields = data['fields']
         title = fields.get('title', '[No Title]')
@@ -103,34 +116,42 @@ def load_all_items(db_conn):
         else: author_str = ""
             
         citekey = fields.get('citationKey', '')
+
         if not citekey:
             ck_match = re.search(r'Citation Key:\s*([^\s\n]+)', fields.get('extra', ''))
-            if ck_match: citekey = ck_match.group(1)
+
+            if ck_match:
+                citekey = ck_match.group(1)
         
-        display_list.append({
-            'id': data['id'],
-            'title': title,
-            'date': date_str,
-            'author': author_str,
-            'citekey': citekey,
-            'fields': fields
-        })
+        display_list.append(
+            { 'id': data['id']
+            , 'title': title
+            , 'date': date_str
+            , 'author': author_str
+            , 'citekey': citekey
+            , 'fields': fields
+            })
         
     return display_list
 
 def trunc(text, width):
     text = str(text)
-    if width <= 3: return "." * width
-    return (text[:width-3] + "...") if len(text) > width else text.ljust(width)
+
+    if width <= 3:
+        return "." * width
+
+    return (text[:width-1] + "…") if len(text) > width else text.ljust(width)
 
 def tui_loop(stdscr, db_conn, raw_path, zotero_path, remote_zotero_path, sftp, cache_dir):
     try: curses.curs_set(0)
     except curses.error: pass
+
     stdscr.nodelay(0)
     curses.start_color()
     curses.use_default_colors()
     
     curses.mousemask(curses.ALL_MOUSE_EVENTS | curses.REPORT_MOUSE_POSITION)
+
     SCROLL_UP = getattr(curses, 'BUTTON4_PRESSED', 524288)
     SCROLL_DOWN = getattr(curses, 'BUTTON5_PRESSED', 2097152)
     
@@ -195,15 +216,16 @@ def tui_loop(stdscr, db_conn, raw_path, zotero_path, remote_zotero_path, sftp, c
         max_detail_scroll = max(0, len(detail_lines) - list_h)
         detail_scroll = max(0, min(detail_scroll, max_detail_scroll))
 
-        arr_d = "▼" if sort_col == 'date' and sort_rev else ("▲" if sort_col == 'date' else "")
+        arr_d = "▼" if sort_col == 'date'    and sort_rev else ("▲" if sort_col == 'date'    else "")
         arr_k = "▼" if sort_col == 'citekey' and sort_rev else ("▲" if sort_col == 'citekey' else "")
-        arr_a = "▼" if sort_col == 'author' and sort_rev else ("▲" if sort_col == 'author' else "")
-        arr_t = "▼" if sort_col == 'title' and sort_rev else ("▲" if sort_col == 'title' else "")
+        arr_a = "▼" if sort_col == 'author'  and sort_rev else ("▲" if sort_col == 'author'  else "")
+        arr_t = "▼" if sort_col == 'title'   and sort_rev else ("▲" if sort_col == 'title'   else "")
 
-        hdr_attr_left = curses.color_pair(3) | (curses.A_BOLD if active_pane == 0 else curses.A_NORMAL)
+        hdr_attr_left  = curses.color_pair(3) | (curses.A_BOLD if active_pane == 0 else curses.A_NORMAL)
         hdr_attr_right = curses.color_pair(3) | (curses.A_BOLD if active_pane == 1 else curses.A_NORMAL)
         
         header_str = f" {trunc('Date'+arr_d, w_date)} | {trunc('CiteKey'+arr_k, w_key)} | {trunc('Author'+arr_a, w_auth)} | {trunc('Title'+arr_t, w_title)}"
+
         stdscr.addstr(0, 0, header_str[:list_w].ljust(list_w), hdr_attr_left)
         stdscr.addstr(0, list_w + 1, " ATTRIBUTES ".center(details_w), hdr_attr_right)
 
@@ -212,11 +234,13 @@ def tui_loop(stdscr, db_conn, raw_path, zotero_path, remote_zotero_path, sftp, c
 
         for i in range(list_h):
             idx = item_scroll + i
+
             if idx < len(items):
                 it = items[idx]
                 row_str = f" {trunc(it['date'], w_date)} | {trunc(it['citekey'], w_key)} | {trunc(it['author'], w_auth)} | {trunc(it['title'], w_title)}"
                 
                 disp_str = row_str[:list_w-1].ljust(list_w)
+
                 if idx == item_idx:
                     stdscr.addstr(i + 1, 0, disp_str, curses.color_pair(1) if active_pane == 0 else curses.A_REVERSE)
                 else:
@@ -224,10 +248,13 @@ def tui_loop(stdscr, db_conn, raw_path, zotero_path, remote_zotero_path, sftp, c
 
         for i in range(list_h):
             idx = detail_scroll + i
+
             if idx < len(detail_lines):
                 text, is_bold = detail_lines[idx]
                 attr = curses.A_BOLD if is_bold else curses.A_NORMAL
-                if active_pane == 1 and text.strip(): attr |= curses.color_pair(1)
+
+                if active_pane == 1 and text.strip():
+                    attr |= curses.color_pair(1)
                 
                 stdscr.addstr(i + 1, list_w + 2, text[:details_w-2].ljust(details_w-2), attr)
 
@@ -240,8 +267,10 @@ def tui_loop(stdscr, db_conn, raw_path, zotero_path, remote_zotero_path, sftp, c
 
         if key in [ord('q'), ord('Q')]:
             break
+
         elif key == curses.KEY_RESIZE:
             continue
+
         elif key == 9: 
             active_pane = 1 - active_pane
             
@@ -249,16 +278,17 @@ def tui_loop(stdscr, db_conn, raw_path, zotero_path, remote_zotero_path, sftp, c
             cols = ['date', 'citekey', 'author', 'title']
             sort_col = cols[(cols.index(sort_col) + 1) % 4]
             apply_sort()
+
         elif key in [ord('r'), ord('R')]:
             sort_rev = not sort_rev
             apply_sort()
 
-        # Handle Search Mode
         elif key == ord('/'):
             try: curses.curs_set(1)
             except curses.error: pass
             
             search_query = ""
+
             while True:
                 prompt = f"/{sort_col.capitalize()}: {search_query}"
                 stdscr.addstr(max_y - 1, 0, prompt[:max_x-1].ljust(max_x - 1), curses.color_pair(2))
@@ -266,13 +296,17 @@ def tui_loop(stdscr, db_conn, raw_path, zotero_path, remote_zotero_path, sftp, c
                 stdscr.refresh()
                 
                 c = stdscr.getch()
+
                 if c in [10, 13, curses.KEY_ENTER]:
                     break
+
                 elif c == 27: # Escape key
                     search_query = None
                     break
+
                 elif c in [8, 127, curses.KEY_BACKSPACE]:
                     search_query = search_query[:-1]
+
                 elif 32 <= c <= 126:
                     search_query += chr(c)
                     
@@ -282,14 +316,20 @@ def tui_loop(stdscr, db_conn, raw_path, zotero_path, remote_zotero_path, sftp, c
             if search_query:
                 last_search = search_query.lower()
                 found = False
+
                 for i in range(len(items)):
                     idx = (item_idx + 1 + i) % len(items)
+
                     if last_search in str(items[idx][sort_col]).lower():
                         item_idx = idx
+
                         if item_idx < item_scroll or item_idx >= item_scroll + list_h:
                             item_scroll = max(0, item_idx - list_h // 2)
+
                         found = True
+
                         break
+
                 if not found:
                     stdscr.addstr(max_y - 1, 0, " [!] Pattern not found ".ljust(max_x - 1), curses.color_pair(2))
                     stdscr.refresh()
@@ -298,12 +338,16 @@ def tui_loop(stdscr, db_conn, raw_path, zotero_path, remote_zotero_path, sftp, c
         # Handle Search Next/Prev
         elif key in [ord('n'), ord('N')] and last_search:
             step = 1 if key == ord('n') else -1
+
             for i in range(len(items)):
                 idx = (item_idx + step + (i * step)) % len(items)
+
                 if last_search in str(items[idx][sort_col]).lower():
                     item_idx = idx
+
                     if item_idx < item_scroll or item_idx >= item_scroll + list_h:
                         item_scroll = max(0, item_idx - list_h // 2)
+
                     break
 
         elif key == ord('1'): w_date = max(4, w_date - 1)
@@ -318,16 +362,23 @@ def tui_loop(stdscr, db_conn, raw_path, zotero_path, remote_zotero_path, sftp, c
         elif key == curses.KEY_UP:
             if active_pane == 0 and item_idx > 0:
                 item_idx -= 1
+
                 if item_idx < item_scroll: item_scroll = item_idx
+
                 detail_scroll = 0
+
             elif active_pane == 1:
                 detail_scroll = max(0, detail_scroll - 1)
                 
         elif key == curses.KEY_DOWN:
             if active_pane == 0 and item_idx < len(items) - 1:
                 item_idx += 1
-                if item_idx >= item_scroll + list_h: item_scroll = item_idx - list_h + 1
+
+                if item_idx >= item_scroll + list_h:
+                    item_scroll = item_idx - list_h + 1
+
                 detail_scroll = 0
+
             elif active_pane == 1:
                 detail_scroll = min(max_detail_scroll, detail_scroll + 1)
                 
@@ -336,6 +387,7 @@ def tui_loop(stdscr, db_conn, raw_path, zotero_path, remote_zotero_path, sftp, c
                 item_idx = max(0, item_idx - list_h)
                 item_scroll = max(0, item_scroll - list_h)
                 detail_scroll = 0
+
             elif active_pane == 1:
                 detail_scroll = max(0, detail_scroll - list_h)
                 
@@ -344,6 +396,7 @@ def tui_loop(stdscr, db_conn, raw_path, zotero_path, remote_zotero_path, sftp, c
                 item_idx = min(len(items) - 1, item_idx + list_h)
                 item_scroll = min(max(0, len(items) - list_h), item_scroll + list_h)
                 detail_scroll = 0
+
             elif active_pane == 1:
                 detail_scroll = min(max_detail_scroll, detail_scroll + list_h)
                 
@@ -353,22 +406,31 @@ def tui_loop(stdscr, db_conn, raw_path, zotero_path, remote_zotero_path, sftp, c
         elif key == curses.KEY_MOUSE:
             try:
                 _, mouse_x, mouse_y, _, bstate = curses.getmouse()
+
             except curses.error:
                 continue
                 
             if bstate & SCROLL_UP or bstate == 65536:
                 if mouse_x < list_w:
                     item_idx = max(0, item_idx - 1)
-                    if item_idx < item_scroll: item_scroll = item_idx
+
+                    if item_idx < item_scroll:
+                        item_scroll = item_idx
+
                     detail_scroll = 0
+
                 else:
                     detail_scroll = max(0, detail_scroll - 1)
                     
             elif bstate & SCROLL_DOWN or bstate == 2097152:
                 if mouse_x < list_w:
                     item_idx = min(len(items)-1, item_idx + 1)
-                    if item_idx >= item_scroll + list_h: item_scroll = item_idx - list_h + 1
+
+                    if item_idx >= item_scroll + list_h:
+                        item_scroll = item_idx - list_h + 1
+
                     detail_scroll = 0
+
                 else:
                     detail_scroll = min(max_detail_scroll, detail_scroll + 1)
                     
@@ -381,27 +443,33 @@ def tui_loop(stdscr, db_conn, raw_path, zotero_path, remote_zotero_path, sftp, c
                     
                     if sort_col == new_col:
                         sort_rev = not sort_rev
+
                     else:
                         sort_col = new_col
                         sort_rev = False
+
                     apply_sort()
                     
                 elif 0 < mouse_y <= list_h and mouse_x < list_w:
                     active_pane = 0
                     clicked_idx = item_scroll + (mouse_y - 1)
+
                     if 0 <= clicked_idx < len(items):
                         if clicked_idx == item_idx and (time.time() - last_click_time < 0.4):
                             trigger_open = True
+
                         else:
                             item_idx = clicked_idx
                             detail_scroll = 0
                             last_click_time = time.time()
+
                 elif mouse_x > list_w:
                     active_pane = 1
         
         if trigger_open and items:
             selected_item_id = items[item_idx]['id']
             cursor = db_conn.cursor()
+
             cursor.execute("""
                 SELECT items.key, itemAttachments.path
                 FROM itemAttachments
@@ -410,6 +478,7 @@ def tui_loop(stdscr, db_conn, raw_path, zotero_path, remote_zotero_path, sftp, c
                 AND (itemAttachments.contentType = 'application/pdf' OR itemAttachments.path LIKE '%.pdf')
                 LIMIT 1
             """, (selected_item_id,))
+
             result = cursor.fetchone()
             
             if result:
@@ -422,23 +491,31 @@ def tui_loop(stdscr, db_conn, raw_path, zotero_path, remote_zotero_path, sftp, c
                 if raw_path.startswith("ssh://"):
                     remote_pdf = f"{remote_zotero_path}/storage/{key_val}/{filename}".replace("//", "/")
                     local_pdf = cache_dir / filename
+
                     try:
                         sftp.get(remote_pdf, str(local_pdf))
                         target_path = local_pdf
+
                     except IOError:
                         stdscr.addstr(max_y - 1, 0, " [!] Error: PDF not found on remote server. ".ljust(max_x - 1), curses.color_pair(2))
                         stdscr.refresh()
                         curses.napms(2000)
                         continue
+
                 else:
                     target_path = zotero_path / 'storage' / key_val / filename
                 
                 if target_path.exists():
-                    subprocess.Popen(['google-chrome', str(target_path)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                    subprocess.Popen( ['google-chrome', str(target_path)]
+                                    , stdout=subprocess.DEVNULL
+                                    , stderr=subprocess.DEVNULL
+                                    )
+
                 else:
                     stdscr.addstr(max_y - 1, 0, " [!] Error: PDF file not found locally. ".ljust(max_x - 1), curses.color_pair(2))
                     stdscr.refresh()
                     curses.napms(2000)
+
             else:
                 stdscr.addstr(max_y - 1, 0, " [!] No PDF attachment found for this item. ".ljust(max_x - 1), curses.color_pair(2))
                 stdscr.refresh()
@@ -455,6 +532,7 @@ def main():
         config = tomllib.load(f)
 
     raw_path = config.get('zotero', {}).get('library_path', '').strip()
+
     if not raw_path:
         print("Error: Missing library_path in settings.")
         sys.exit(1)
@@ -471,22 +549,25 @@ def main():
         
         if '@' in user_host:
             username, hostname = user_host.split('@', 1)
+
         else:
             username = None
             hostname = user_host
 
         hostname = hostname.replace(":", "")
-
-        client = setup_ssh_client(hostname=hostname, username=username)
-        sftp = client.open_sftp()
+        client   = setup_ssh_client(hostname=hostname, username=username)
+        sftp     = client.open_sftp()
         
         cache_dir.mkdir(exist_ok=True)
-        db_path = cache_dir / "zotero.sqlite"
+
+        db_path   = cache_dir / "zotero.sqlite"
         remote_db = f"{remote_zotero_path}/zotero.sqlite".replace("//", "/")
         
         print("Syncing database...")
+
         try:
             sftp.get(remote_db, str(db_path))
+
         except IOError:
             print(f"\nError: Database not found on remote server at {remote_db}")
             sys.exit(1)
