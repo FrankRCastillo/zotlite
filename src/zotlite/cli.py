@@ -137,7 +137,7 @@ def load_all_items(db_conn):
 def trunc(text, width):
     text = str(text)
 
-    if width <= 3:
+    if width <= 1:
         return "." * width
 
     return (text[:width-1] + "…") if len(text) > width else text.ljust(width)
@@ -195,7 +195,7 @@ def tui_loop(stdscr, db_conn, raw_path, zotero_path, remote_zotero_path, sftp, c
 
         details_w = max(15, int(max_x * details_w_pct))
         list_w = max_x - details_w - 1
-        list_h = max_y - 3 
+        list_h = max_y - 1 
         
         total_fixed = w_date + w_key + w_auth + 13
         if total_fixed > list_w - 5:
