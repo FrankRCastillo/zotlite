@@ -195,12 +195,14 @@ def tui_loop(stdscr, db_conn, raw_path, zotero_path, remote_zotero_path, sftp, c
 
         details_w = max(15, int(max_x * details_w_pct))
         list_w = max_x - details_w - 1
-        list_h = max_y - 1 
+        list_h = max_y - 2 
         
         total_fixed = w_date + w_key + w_auth + 13
+
         if total_fixed > list_w - 5:
             overshoot = total_fixed - (list_w - 5)
             w_auth = max(4, w_auth - overshoot)
+
         w_title = max(5, list_w - (w_date + w_key + w_auth + 13))
 
         detail_lines = []
