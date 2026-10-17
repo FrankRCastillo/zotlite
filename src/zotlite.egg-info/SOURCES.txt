@@ -1,7 +1,14 @@
 README.md
 pyproject.toml
 src/zotlite/__init__.py
+src/zotlite/__main__.py
 src/zotlite/cli.py
+src/zotlite/config.py
+src/zotlite/library.py
+src/zotlite/pdfsearch.py
+src/zotlite/storage.py
+src/zotlite/tui.py
+src/zotlite/viewer.py
 src/zotlite.egg-info/PKG-INFO
 src/zotlite.egg-info/SOURCES.txt
 src/zotlite.egg-info/dependency_links.txt
