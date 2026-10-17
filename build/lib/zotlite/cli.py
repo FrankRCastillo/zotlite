@@ -90,7 +90,11 @@ class Commands:
         matches = pdf.search(pattern, ignore_case=args.ignore_case, regex=args.regex)
         colors  = Colors.for_stream(args.color, sys.stdout)
 
-        if args.count:
+        if args.files_with_matches:
+            if matches:
+                print(item.citekey)
+
+        elif args.count:
             print(len(matches))
 
         else:
@@ -126,7 +130,9 @@ def build_parser():
     p.add_argument("pattern", nargs="+", help="text to search for (several words are joined with spaces)")
     p.add_argument("-i", "--ignore-case", action="store_true", help="case-insensitive search")
     p.add_argument("-E", "--regex", action="store_true", help="treat the pattern as a Python regular expression")
-    p.add_argument("-c", "--count", action="store_true", help="only print the number of matches")
+    output = p.add_mutually_exclusive_group()
+    output.add_argument("-c", "--count", action="store_true", help="only print the number of matches")
+    output.add_argument("-l", "--files-with-matches", action="store_true", help="only print the citation key, if there are matches")
     p.add_argument("-C", "--context", type=int, default=60, metavar="N", help="characters of context on each side (default: 60)")
     p.add_argument("--color", choices=["auto", "always", "never"], default="auto")
 
